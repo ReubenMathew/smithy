@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	imageAmiId   = "ami-0e83be366243f524a"
-	InstanceName = "reuben-nats-dev-cluster"
+	imageAmiId      = "ami-0e83be366243f524a"
+	InstanceTagName = "reuben-nats-dev-cluster"
 )
 
 func main() {
@@ -35,7 +35,8 @@ func main() {
 		log.Fatalf("unable to create security group, %v", err)
 	}
 
-	// create security group inbound traffic rules
+	// create security group traffic rules
+	// egress rule for all outbound traffic is created by default
 	_, err = ec2Svc.AuthorizeSecurityGroupIngress(context.TODO(), &ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId:    securityGroup.GroupId,
 		CidrIp:     aws.String("0.0.0.0/0"),
@@ -60,7 +61,7 @@ func main() {
 				Tags: []types.Tag{
 					{
 						Key:   aws.String("Name"),
-						Value: aws.String(InstanceName),
+						Value: aws.String(InstanceTagName),
 					},
 				},
 			},
@@ -69,6 +70,7 @@ func main() {
 		InstanceType: types.InstanceTypeT2Micro,
 		MinCount:     instanceCount,
 		MaxCount:     instanceCount,
+		KeyName:      aws.String("reuben-dev"),
 	})
 	if err != nil {
 		log.Fatalf("unable to run instance, %v", err)
@@ -82,6 +84,7 @@ func main() {
 	createInstancesTimer := time.NewTimer(10 * time.Minute)
 	createInstancesStatusTicker := time.NewTicker(5 * time.Second)
 	expectedCompletedStates := len(res.Instances)
+	//createEc2InstancesWaiter := ec2.NewInstanceStatusOkWaiter(ec2Svc)
 	// wait for instances to be ready
 createInstancesWaitLoop:
 	for {
@@ -171,5 +174,5 @@ terminateInstancesWaitLoop:
 	if err != nil {
 		log.Fatalf("unable to delete security group, %v", err)
 	}
-	log.Printf("deleted security group %s", *securityGroup.GroupId)	
+	log.Printf("deleted security group %s", *securityGroup.GroupId)
 }
