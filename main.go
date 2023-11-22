@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -23,13 +24,36 @@ func main() {
 	}
 
 	// ec2 service
-	svc := ec2.NewFromConfig(cfg)
+	ec2Svc := ec2.NewFromConfig(cfg)
 
-	// num of instances to create
+	// create security group
+	securityGroup, err := ec2Svc.CreateSecurityGroup(context.TODO(), &ec2.CreateSecurityGroupInput{
+		Description: aws.String("temp nats cluster security group"),
+		GroupName:   aws.String("temp-nats-cluster"),
+	})
+	if err != nil {
+		log.Fatalf("unable to create security group, %v", err)
+	}
+
+	// create security group inbound traffic rules
+	_, err = ec2Svc.AuthorizeSecurityGroupIngress(context.TODO(), &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId:    securityGroup.GroupId,
+		CidrIp:     aws.String("0.0.0.0/0"),
+		IpProtocol: aws.String("tcp"),
+		FromPort:   aws.Int32(22),
+		ToPort:     aws.Int32(22),
+	})
+	if err != nil {
+		log.Fatalf("unable to authorize security group ingress, %v", err)
+	}
+	log.Printf("created security group %s", *securityGroup.GroupId)
+
+	// HACK: make parameter later
 	instanceCount := aws.Int32(3)
-
 	// create instances
-	res, err := svc.RunInstances(context.TODO(), &ec2.RunInstancesInput{
+	res, err := ec2Svc.RunInstances(context.TODO(), &ec2.RunInstancesInput{
+		// TODO: add security group
+		SecurityGroupIds: []string{*securityGroup.GroupId},
 		TagSpecifications: []types.TagSpecification{
 			{
 				ResourceType: types.ResourceTypeInstance,
@@ -50,24 +74,33 @@ func main() {
 		log.Fatalf("unable to run instance, %v", err)
 	}
 
+	// get all instance ids
 	instanceIds := []string{}
 	for _, instance := range res.Instances {
 		instanceIds = append(instanceIds, *instance.InstanceId)
 	}
-	log.Printf("created instances %v", instanceIds)
-
 	createInstancesTimer := time.NewTimer(10 * time.Minute)
-	statusCheckTicker := time.NewTicker(5 * time.Second)
+	createInstancesStatusTicker := time.NewTicker(5 * time.Second)
 	expectedCompletedStates := len(res.Instances)
 	// wait for instances to be ready
-	createInstancesWaitLoop: for {
+createInstancesWaitLoop:
+	for {
 		select {
 		case <-createInstancesTimer.C:
 			log.Fatalln("Creating instances took too long")
-		case <-statusCheckTicker.C:
+		case <-createInstancesStatusTicker.C:
 			completedStates := 0
-			for _, instance := range res.Instances {
-				currentState := instance.State.Name
+			// get instance statuses
+			var describeInstanceStatusesOutput *ec2.DescribeInstanceStatusOutput
+			describeInstanceStatusesOutput, err = ec2Svc.DescribeInstanceStatus(context.TODO(), &ec2.DescribeInstanceStatusInput{
+				InstanceIds: instanceIds,
+			})
+			if err != nil {
+				log.Fatalf("unable to describe instance statuses, %v", err)
+			}
+			for _, instance := range describeInstanceStatusesOutput.InstanceStatuses {
+				currentState := instance.InstanceState.Name
+				log.Printf("instance %s is in state %s", *instance.InstanceId, currentState)
 				if currentState == types.InstanceStateNameRunning {
 					completedStates++
 				}
@@ -78,13 +111,19 @@ func main() {
 			}
 		}
 	}
+	log.Printf("created instances %v", instanceIds)
 
 	// wait
-	time.Sleep(30 * time.Second)
-	log.Println("Waiting for 30s")
+	log.Println("Enter something here to terminate instances")
+	var input string
+	_, err = fmt.Scanln(&input)
+	if err != nil {
+		log.Fatalf("unable to read input, %v", err)
+	}
 
 	// terminate all created instances
-	_, err = svc.TerminateInstances(context.TODO(), &ec2.TerminateInstancesInput{
+	log.Printf("terminating instances %v", instanceIds)
+	_, err = ec2Svc.TerminateInstances(context.TODO(), &ec2.TerminateInstancesInput{
 		InstanceIds: instanceIds,
 	})
 	if err != nil {
@@ -92,24 +131,45 @@ func main() {
 	}
 	// wait for instances to terminate
 	terminateInstancesTimer := time.NewTimer(10 * time.Minute)
-	terminateInstancesWaitLoop: for {
+	terminateInstancesStatusTicker := time.NewTicker(5 * time.Second)
+	expectedTerminatedStates := len(res.Instances)
+terminateInstancesWaitLoop:
+	for {
 		select {
 		case <-terminateInstancesTimer.C:
 			log.Fatalln("Terminating instances took too long")
-		case <-statusCheckTicker.C:
-			completedStates := 0
-			for _, instance := range res.Instances {
-				currentState := instance.State.Name
+		case <-terminateInstancesStatusTicker.C:
+			terminatedStates := 0
+			// get instance statuses
+			var describeInstanceStatusesOutput *ec2.DescribeInstanceStatusOutput
+			describeInstanceStatusesOutput, err = ec2Svc.DescribeInstanceStatus(context.TODO(), &ec2.DescribeInstanceStatusInput{
+				InstanceIds: instanceIds,
+				// need to include this so that terminated instances are included in the response
+				IncludeAllInstances: aws.Bool(true),
+			})
+			if err != nil {
+				log.Fatalf("unable to describe instance statuses, %v", err)
+			}
+			for _, instance := range describeInstanceStatusesOutput.InstanceStatuses {
+				currentState := instance.InstanceState.Name
+				log.Printf("instance %s is in state %s", *instance.InstanceId, currentState)
 				if currentState == types.InstanceStateNameTerminated {
-					completedStates++
+					terminatedStates++
 				}
 			}
-			if completedStates == expectedCompletedStates {
-				log.Println("All instances successfully created and running")
+			if terminatedStates == expectedTerminatedStates {
 				break terminateInstancesWaitLoop
 			}
 		}
 	}
 	log.Printf("terminated instances %v", instanceIds)
 
+	// delete security group
+	_, err = ec2Svc.DeleteSecurityGroup(context.TODO(), &ec2.DeleteSecurityGroupInput{
+		GroupId: securityGroup.GroupId,
+	})
+	if err != nil {
+		log.Fatalf("unable to delete security group, %v", err)
+	}
+	log.Printf("deleted security group %s", *securityGroup.GroupId)	
 }
