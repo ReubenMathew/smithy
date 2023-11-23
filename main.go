@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,6 +21,15 @@ const (
 )
 
 func main() {
+
+	// read user_data.sh file as base64 encoded string
+	fileBytes, err := os.ReadFile("user_data.sh")
+	if err != nil {
+		log.Fatalf("unable to read user_data.sh file, %v", err)
+	}
+	// encode userData as base64
+	 userDataBase64 := base64.StdEncoding.EncodeToString(fileBytes)
+
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-east-2"))
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
@@ -50,11 +61,31 @@ func main() {
 	// create security group traffic rules
 	// egress rule for all outbound traffic is created by default
 	_, err = ec2Svc.AuthorizeSecurityGroupIngress(context.TODO(), &ec2.AuthorizeSecurityGroupIngressInput{
-		GroupId:    securityGroup.GroupId,
-		CidrIp:     aws.String("0.0.0.0/0"),
-		IpProtocol: aws.String("tcp"),
-		FromPort:   aws.Int32(22),
-		ToPort:     aws.Int32(22),
+		GroupId: securityGroup.GroupId,
+		IpPermissions: []types.IpPermission{
+			{
+				IpRanges: []types.IpRange{
+					{
+						CidrIp:      aws.String("0.0.0.0/0"),
+						Description: aws.String("NATS port for inbound traffic"),
+					},
+				},
+				FromPort:   aws.Int32(4222),
+				ToPort:     aws.Int32(4222),
+				IpProtocol: aws.String("tcp"),
+			},
+			{
+				IpRanges: []types.IpRange{
+					{
+						CidrIp:      aws.String("0.0.0.0/0"),
+						Description: aws.String("Inbound SSH port from any machine"),
+					},
+				},
+				IpProtocol: aws.String("tcp"),
+				FromPort:   aws.Int32(22),
+				ToPort:     aws.Int32(22),
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("unable to authorize security group ingress, %v", err)
@@ -83,6 +114,7 @@ func main() {
 		MinCount:     instanceCount,
 		MaxCount:     instanceCount,
 		KeyName:      aws.String("reuben-dev"),
+		UserData:     aws.String(userDataBase64),
 	})
 	if err != nil {
 		log.Fatalf("unable to run instance, %v", err)
@@ -108,7 +140,7 @@ func main() {
 	log.Printf("created instances %v", instanceIds)
 
 	// get public dns names of instances
-	describeInstancesResp, err := ec2Svc.DescribeInstances(context.TODO(), &ec2.DescribeInstancesInput{	
+	describeInstancesResp, err := ec2Svc.DescribeInstances(context.TODO(), &ec2.DescribeInstancesInput{
 		InstanceIds: instanceIds,
 	})
 	if err != nil {
