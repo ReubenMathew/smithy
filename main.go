@@ -2,55 +2,123 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
+	"flag"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/nats-io/nats.go"
 )
 
+type Options struct {
+	Command          string
+	CommandServerUrl string
+	Verbose          bool
+}
+
+func DefaultOptions() Options {
+	return Options{
+		CommandServerUrl: nats.DefaultURL,
+		Verbose:          false,
+	}
+}
 const (
-	imageAmiId        = "ami-0e83be366243f524a"
-	InstanceTagName   = "reuben-nats-dev-cluster"
-	securityGroupName = "temp-nats-cluster"
+	// TODO: make as a parameter
+	securityGroupName = "temp-nats-cluster-security-group"
 )
 
 func main() {
 
-	// read user_data.sh file as base64 encoded string
-	fileBytes, err := os.ReadFile("user_data.sh")
-	if err != nil {
-		log.Fatalf("unable to read user_data.sh file, %v", err)
-	}
-	// encode userData as base64
-	userDataBase64 := base64.StdEncoding.EncodeToString(fileBytes)
+	opts := DefaultOptions()
 
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-east-2"))
+	// read flags and positional arguments to override default options
+	flag.StringVar(&opts.CommandServerUrl, "s", opts.CommandServerUrl, "The NATS server URLs (separated by comma)")
+	flag.BoolVar(&opts.Verbose, "v", opts.Verbose, "Enable verbose mode")
+	flag.StringVar(&opts.Command, "c", opts.Command, "Command to run")
+	flag.Parse()
+
+	// HACK: make a proper context
+	ctx := context.TODO()
+
+	// load config and establish a ec2 service
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-2"))
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}
+	svc := ec2.NewFromConfig(cfg)
 
-	// ec2 service
-	ec2Svc := ec2.NewFromConfig(cfg)
+	// HACK: make proper fn
+	createSecurityGroup := func() {
+		log.Printf("Attempting to create security group %s...", securityGroupName)
+		securityGroupId, err := CreateSecurityGroup(ctx, svc)
+		if err != nil {
+			log.Fatalf("unable to create security group, %v", err)
+		}
+		log.Printf("created security group %s", *securityGroupId)
+	}
+
+	// HACK: make proper fn
+	deleteSecurityGroup := func() {
+		log.Printf("Attempting to delete security group %s...", securityGroupName)
+		err := DeleteSecurityGroup(ctx, svc)
+		if err != nil {
+			log.Fatalf("unable to delete security group, %v", err)
+		}
+		log.Println("deleted security group")
+	}
+
+	// HACK: make proper subcommand later
+	switch opts.Command {
+	case "deploy":
+		createSecurityGroup()
+	case "clean":
+		deleteSecurityGroup()
+	default:
+		log.Fatalf("unknown command: %s", opts.Command)
+	}
+
+}
+
+func DeleteSecurityGroup(ctx context.Context, svc *ec2.Client) error {
+	_, err := svc.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
+		GroupName: aws.String(securityGroupName),
+	})	
+	if err != nil {
+		return fmt.Errorf("unable to delete security group, %v", err)
+	}
+	return nil
+}
+
+func CreateSecurityGroup(ctx context.Context, svc *ec2.Client) (securityGroupId *string, err error) {
 
 	// create security group
-	securityGroup, err := ec2Svc.CreateSecurityGroup(context.TODO(), &ec2.CreateSecurityGroupInput{
+	securityGroup, err := svc.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
 		Description: aws.String("temp nats cluster security group"),
 		GroupName:   aws.String(securityGroupName),
 	})
 	if err != nil {
-		log.Fatalf("unable to create security group, %v", err)
+		return
 	}
-	// TODO: wait for security group to be created
+	securityGroupId = securityGroup.GroupId
+
+	// TODO: make as a parameter
+	waitTime := 5 * time.Minute
+
+	// wait for security group to be created
+	if err = ec2.NewSecurityGroupExistsWaiter(svc).Wait(ctx, &ec2.DescribeSecurityGroupsInput{
+		GroupIds: []string{*securityGroupId},
+	}, waitTime); err != nil {
+		err = fmt.Errorf("security group %s never became available after %f minutes: %v", *securityGroupId, waitTime.Minutes(), err)
+		return
+	}
 
 	// create security group traffic rules
 	// egress rule for all outbound traffic is created by default
-	_, err = ec2Svc.AuthorizeSecurityGroupIngress(context.TODO(), &ec2.AuthorizeSecurityGroupIngressInput{
+	_, err = svc.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: securityGroup.GroupId,
 		IpPermissions: []types.IpPermission{
 			{
@@ -78,106 +146,8 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("unable to authorize security group ingress, %v", err)
+		err = fmt.Errorf("unable to authorize security group ingress, %v", err)
+		return
 	}
-	log.Printf("created security group %s", *securityGroup.GroupId)
-
-	// HACK: make parameter later
-	instanceCount := aws.Int32(3)
-	// create instances
-	res, err := ec2Svc.RunInstances(context.TODO(), &ec2.RunInstancesInput{
-		// TODO: add security group
-		SecurityGroupIds: []string{*securityGroup.GroupId},
-		TagSpecifications: []types.TagSpecification{
-			{
-				ResourceType: types.ResourceTypeInstance,
-				Tags: []types.Tag{
-					{
-						Key:   aws.String("Name"),
-						Value: aws.String(InstanceTagName),
-					},
-				},
-			},
-		},
-		ImageId:      aws.String(imageAmiId),
-		InstanceType: types.InstanceTypeT2Micro,
-		MinCount:     instanceCount,
-		MaxCount:     instanceCount,
-		KeyName:      aws.String("reuben-dev"),
-		UserData:     aws.String(userDataBase64),
-	})
-	if err != nil {
-		log.Fatalf("unable to run instance, %v", err)
-	}
-
-	// get all instance ids
-	instanceIds := []string{}
-	for _, instance := range res.Instances {
-		instanceIds = append(instanceIds, *instance.InstanceId)
-	}
-
-	// wait for instances to be in status ok
-	if err = ec2.NewInstanceRunningWaiter(ec2Svc).
-		Wait(
-			context.TODO(),
-			&ec2.DescribeInstancesInput{
-				InstanceIds: instanceIds,
-			},
-			10*time.Minute,
-		); err != nil {
-		log.Fatalf("failed to wait for instances to be in status ok, %v", err)
-	}
-	log.Printf("created instances %v", instanceIds)
-
-	// get public dns names of instances
-	describeInstancesResp, err := ec2Svc.DescribeInstances(context.TODO(), &ec2.DescribeInstancesInput{
-		InstanceIds: instanceIds,
-	})
-	if err != nil {
-		log.Fatalf("unable to describe instances, %v", err)
-	}
-	for _, reservation := range describeInstancesResp.Reservations {
-		log.Printf("Reservation %s", *reservation.ReservationId)
-		for _, instance := range reservation.Instances {
-			log.Printf("Instance %s - %s", *instance.InstanceId, *instance.PublicDnsName)
-		}
-	}
-
-	// block before terminating instances
-	log.Println("Enter something here to terminate instances")
-	var input string
-	_, err = fmt.Scanln(&input)
-	if err != nil {
-		log.Fatalf("unable to read input, %v", err)
-	}
-
-	// terminate all created instances
-	log.Printf("terminating instances %v", instanceIds)
-	_, err = ec2Svc.TerminateInstances(context.TODO(), &ec2.TerminateInstancesInput{
-		InstanceIds: instanceIds,
-	})
-	if err != nil {
-		log.Fatalf("unable to terminate instances: %v", err)
-	}
-
-	// wait for instances to be terminated
-	if err = ec2.NewInstanceTerminatedWaiter(ec2Svc).
-		Wait(
-			context.TODO(), &ec2.DescribeInstancesInput{
-				InstanceIds: instanceIds,
-			},
-			10*time.Minute,
-		); err != nil {
-		log.Fatalf("failed to wait for instances to be terminated, %v", err)
-	}
-	log.Printf("terminated instances %v", instanceIds)
-
-	// delete security group
-	_, err = ec2Svc.DeleteSecurityGroup(context.TODO(), &ec2.DeleteSecurityGroupInput{
-		GroupId: securityGroup.GroupId,
-	})
-	if err != nil {
-		log.Fatalf("unable to delete security group, %v", err)
-	}
-	log.Printf("deleted security group %s", *securityGroup.GroupId)
+	return
 }
