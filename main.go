@@ -28,7 +28,7 @@ func main() {
 		log.Fatalf("unable to read user_data.sh file, %v", err)
 	}
 	// encode userData as base64
-	 userDataBase64 := base64.StdEncoding.EncodeToString(fileBytes)
+	userDataBase64 := base64.StdEncoding.EncodeToString(fileBytes)
 
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-east-2"))
 	if err != nil {
@@ -38,17 +38,6 @@ func main() {
 	// ec2 service
 	ec2Svc := ec2.NewFromConfig(cfg)
 
-	// delete initial security group
-	// HACK: should remove this
-	_, err = ec2Svc.DeleteSecurityGroup(context.TODO(), &ec2.DeleteSecurityGroupInput{
-		GroupName: aws.String(securityGroupName),
-	})
-	if err != nil {
-		log.Printf("unable to delete security group, %v", err)
-	} else {
-		log.Printf("deleted security group %s", securityGroupName)
-	}
-
 	// create security group
 	securityGroup, err := ec2Svc.CreateSecurityGroup(context.TODO(), &ec2.CreateSecurityGroupInput{
 		Description: aws.String("temp nats cluster security group"),
@@ -57,6 +46,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("unable to create security group, %v", err)
 	}
+	// TODO: wait for security group to be created
 
 	// create security group traffic rules
 	// egress rule for all outbound traffic is created by default
