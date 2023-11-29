@@ -1,4 +1,4 @@
-module aws-sdk-poc
+module smithy
 
 go 1.21.3
 
