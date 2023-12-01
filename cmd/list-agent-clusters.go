@@ -13,6 +13,8 @@ import (
 
 type listAgentClustersCmd struct {
 	metaCommand
+	serverUrl      string
+	credsPath      string
 }
 
 func listAgentClustersCommand() subcommands.Command {
@@ -20,9 +22,14 @@ func listAgentClustersCommand() subcommands.Command {
 		metaCommand: metaCommand{
 			name:     "list-agent-clusters",
 			synopsis: "list all smithy agent clusters",
-			usage:    "list-agent-clusters",
+			usage:    "list-agent-clusters -server <url> -creds </path/to/file>",
 		},
 	}
+}
+
+func (ec *listAgentClustersCmd) SetFlags(f *flag.FlagSet) {
+	f.StringVar(&ec.serverUrl, "server", nats.DefaultURL, "url of the command server")
+	f.StringVar(&ec.credsPath, "creds", "", "path to creds file")
 }
 
 func (ec *listAgentClustersCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
@@ -30,9 +37,16 @@ func (ec *listAgentClustersCmd) Execute(ctx context.Context, f *flag.FlagSet, ar
 	// --------------------
 	// HACK: pull out later
 
+	// default options
+	opts := []nats.Option{}
+
+	// if supplied a creds file, use it
+	if ec.credsPath != "" {
+		opts = append(opts, nats.UserCredentials(ec.credsPath))
+	}
+
 	// create NATS connection
-	// TODO: pass url and creds as parameters
-	nc, err := nats.Connect(nats.DefaultURL)
+	nc, err := nats.Connect(ec.serverUrl, opts...)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure

@@ -18,7 +18,7 @@ const (
 	// TODO: put this in a better place
 	InstanceTagNamePrefix        = "smithy-compute-node"
 	SecurityGroupNamePrefix      = "smithy-sg"
-	smithyClustersDataBucketName = "smithy-clusters"
+	smithyClustersDataBucketName = "smithy-agent-clusters"
 
 	// TODO: make parameters
 	smithyId = "default123"
@@ -32,6 +32,8 @@ type Deployer interface {
 type deployAgentsCmd struct {
 	metaCommand
 	numberOfAgents uint
+	serverUrl      string
+	credsPath      string
 	timeout        time.Duration
 }
 
@@ -39,21 +41,23 @@ func deployAgentsCommand() subcommands.Command {
 	return &deployAgentsCmd{
 		metaCommand: metaCommand{
 			name:     "deploy-agents",
-			synopsis: "provision a set of cloud compute instances, each running an agent, within a security group",
-			usage:    "deploy-agent -n <number> -t <duration>",
+			synopsis: "provision a set agents, each within a compute instance",
+			usage:    "deploy-agent -n <number> -t <duration> -server <url> -creds </path/to/file>",
 		},
 	}
 }
 
-func (ec *deployAgentsCmd) SetFlags(f *flag.FlagSet) {
-	f.UintVar(&ec.numberOfAgents, "n", 3, "number of agents")
-	f.DurationVar(&ec.timeout, "t", 10*time.Minute, "timeout duration")
+func (dac *deployAgentsCmd) SetFlags(f *flag.FlagSet) {
+	f.UintVar(&dac.numberOfAgents, "n", 3, "number of agents")
+	f.StringVar(&dac.serverUrl, "server", nats.DefaultURL, "url to command server")
+	f.StringVar(&dac.credsPath, "creds", "", "path to creds file")
+	f.DurationVar(&dac.timeout, "t", 10*time.Minute, "timeout duration for all context operations")
 }
 
-func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
 
 	// timeout context
-	deployCtx, cancel := context.WithTimeout(ctx, ec.timeout)
+	deployCtx, cancel := context.WithTimeout(ctx, dac.timeout)
 	defer cancel()
 
 	// TODO: make fns for each value here
@@ -65,9 +69,16 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 	// --------------------
 	// HACK: pull out later
 
+	// default options
+	opts := []nats.Option{}
+
+	// if supplied a creds file, use it
+	if dac.credsPath != "" {
+		opts = append(opts, nats.UserCredentials(dac.credsPath))
+	}
+
 	// create NATS connection
-	// TODO: pass url and creds as parameters
-	nc, err := nats.Connect(nats.DefaultURL)
+	nc, err := nats.Connect(dac.serverUrl, opts...)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
@@ -85,6 +96,8 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
+	// --------------------
+
 	// check if smithyId already exists
 	_, err = smithyClustersDataBucket.Get(deployCtx, smithyId)
 	switch err {
@@ -97,10 +110,9 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
-	// --------------------
 
 	// create deployer service
-	// TODO: make into a factory
+	// TODO: make into a (cloud-provider) factory
 	var deployer Deployer
 	deployer, err = aws.New(deployCtx)
 	if err != nil {
@@ -116,8 +128,8 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 	}
 	log.Printf("created security group %s: %s", securityGroupName, securityGroupId)
 
-	log.Printf("creating %d compute instances", ec.numberOfAgents)
-	computeInstances, err := deployer.CreateComputeInstances(deployCtx, securityGroupName, instanceTagName, int32(ec.numberOfAgents))
+	log.Printf("creating %d compute instances", dac.numberOfAgents)
+	computeInstances, err := deployer.CreateComputeInstances(deployCtx, securityGroupName, instanceTagName, int32(dac.numberOfAgents))
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
@@ -132,15 +144,11 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 		ComputeInstances:  computeInstances,
 	}
 
-	// --------------------
-	// HACK: pull out later
-
 	// create entry in smithy cluster bucket
 	if _, err = smithyClustersDataBucket.Create(deployCtx, smithyId, agentCluster.Bytes()); err != nil {
-		log.Println(err.Error())	
+		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
-	// --------------------
 
 	return subcommands.ExitSuccess
 }

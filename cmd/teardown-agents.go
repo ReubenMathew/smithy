@@ -20,6 +20,8 @@ type Terminator interface {
 
 type teardownAgentsCmd struct {
 	metaCommand
+	serverUrl      string
+	credsPath      string
 	timeout time.Duration
 }
 
@@ -27,14 +29,16 @@ func teardownAgentsCommand() subcommands.Command {
 	return &teardownAgentsCmd{
 		metaCommand: metaCommand{
 			name:     "teardown-agents",
-			synopsis: "terminate all agents within a security group",
-			usage:    "teardown-agents -t <duration>",
+			synopsis: "terminate all agents for a given id",
+			usage:    "teardown-agents -t <duration> -server <url> -creds </path/to/file>",
 		},
 	}
 }
 
-func (ec *teardownAgentsCmd) SetFlags(f *flag.FlagSet) {
-	f.DurationVar(&ec.timeout, "t", 10*time.Minute, "timeout duration")
+func (tac *teardownAgentsCmd) SetFlags(f *flag.FlagSet) {
+	f.StringVar(&tac.serverUrl, "server", nats.DefaultURL, "url to command server")
+	f.StringVar(&tac.credsPath, "creds", "", "path to creds file")
+	f.DurationVar(&tac.timeout, "t", 10*time.Minute, "timeout duration")
 }
 
 func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
@@ -46,9 +50,16 @@ func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args 
 	// --------------------
 	// HACK: pull out later
 
+	// default options
+	opts := []nats.Option{}
+
+	// if supplied a creds file, use it
+	if ec.credsPath != "" {
+		opts = append(opts, nats.UserCredentials(ec.credsPath))
+	}
+
 	// create NATS connection
-	// TODO: pass url and creds as parameters
-	nc, err := nats.Connect(nats.DefaultURL)
+	nc, err := nats.Connect(ec.serverUrl, opts...)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
