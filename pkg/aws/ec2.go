@@ -12,11 +12,11 @@ import (
 )
 
 const (
+	// TODO: make parameter
 	imageAmiId      = "ami-0e83be366243f524a"
-	InstanceTagName = "temp-nats-compute-instance"
 )
 
-func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceCount int32) ([]cloud.ComputeInstance, error) {
+func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceTagName string, instanceCount int32) ([]cloud.ComputeInstance, error) {
 	// create instances
 	res, err := awsClient.svc.RunInstances(ctx, &ec2.RunInstancesInput{
 		SecurityGroups: []string{securityGroupName},
@@ -26,7 +26,7 @@ func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securit
 				Tags: []types.Tag{
 					{
 						Key:   aws.String("Name"),
-						Value: aws.String(InstanceTagName),
+						Value: aws.String(instanceTagName),
 					},
 				},
 			},
