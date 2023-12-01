@@ -11,30 +11,30 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-type getAgentClusterInfoCmd struct {
+type getInfoCmd struct {
 	metaCommand
 	serverUrl      string
 	credsPath      string
 	smithyClusterId string
 }
 
-func getAgentClusterInfoCommand() subcommands.Command {
-	return &getAgentClusterInfoCmd{
+func getInfoCommand() subcommands.Command {
+	return &getInfoCmd{
 		metaCommand: metaCommand{
-			name:     "get-agent-cluster-info",
-			synopsis: "get agent cluster info",
-			usage:    "get-agent-cluster-info --id <smithy-cluster-id> -server <url> -creds </path/to/file>",
+			name:     "get-info",
+			synopsis: "get info",
+			usage:    "get-info --id <smithy-cluster-id> -server <url> -creds </path/to/file>",
 		},
 	}
 }
 
-func (ec *getAgentClusterInfoCmd) SetFlags(f *flag.FlagSet) {
+func (ec *getInfoCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&ec.smithyClusterId, "id", "", "smithy cluster id")
 	f.StringVar(&ec.serverUrl, "server", nats.DefaultURL, "url of the command server")
 	f.StringVar(&ec.credsPath, "creds", "", "path to creds file")
 }
 
-func (ec *getAgentClusterInfoCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+func (ec *getInfoCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
 	if ec.smithyClusterId == "" {
 		f.Usage()
 		return subcommands.ExitFailure

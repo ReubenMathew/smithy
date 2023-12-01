@@ -19,9 +19,6 @@ const (
 	InstanceTagNamePrefix        = "smithy-compute-node"
 	SecurityGroupNamePrefix      = "smithy-sg"
 	smithyClustersDataBucketName = "smithy-agent-clusters"
-
-	// TODO: make parameters
-	smithyId = "default123"
 )
 
 type Deployer interface {
@@ -34,6 +31,7 @@ type deployAgentsCmd struct {
 	numberOfAgents uint
 	serverUrl      string
 	credsPath      string
+	smithyId       string
 	timeout        time.Duration
 }
 
@@ -42,12 +40,13 @@ func deployAgentsCommand() subcommands.Command {
 		metaCommand: metaCommand{
 			name:     "deploy-agents",
 			synopsis: "provision a set agents, each within a compute instance",
-			usage:    "deploy-agent -n <number> -t <duration> -server <url> -creds </path/to/file>",
+			usage:    "deploy-agent -id <string> -n <int> -t <duration> -server <url> -creds </path/to/file>",
 		},
 	}
 }
 
 func (dac *deployAgentsCmd) SetFlags(f *flag.FlagSet) {
+	f.StringVar(&dac.smithyId, "id", "default", "smithy cluster id")
 	f.UintVar(&dac.numberOfAgents, "n", 3, "number of agents")
 	f.StringVar(&dac.serverUrl, "server", nats.DefaultURL, "url to command server")
 	f.StringVar(&dac.credsPath, "creds", "", "path to creds file")
@@ -62,8 +61,8 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 
 	// TODO: make fns for each value here
 	var (
-		securityGroupName = fmt.Sprintf("%s-%s", SecurityGroupNamePrefix, smithyId)
-		instanceTagName   = fmt.Sprintf("%s-%s", InstanceTagNamePrefix, smithyId)
+		securityGroupName = fmt.Sprintf("%s-%s", SecurityGroupNamePrefix, dac.smithyId)
+		instanceTagName   = fmt.Sprintf("%s-%s", InstanceTagNamePrefix, dac.smithyId)
 	)
 
 	// --------------------
@@ -99,10 +98,10 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 	// --------------------
 
 	// check if smithyId already exists
-	_, err = smithyClustersDataBucket.Get(deployCtx, smithyId)
+	_, err = smithyClustersDataBucket.Get(deployCtx, dac.smithyId)
 	switch err {
 	case nil:
-		log.Printf("smithy cluster %s already exists, nothing to create", smithyId)
+		log.Printf("smithy cluster %s already exists, nothing to create", dac.smithyId)
 		return subcommands.ExitUsageError
 	case jetstream.ErrKeyNotFound:
 		// continue
@@ -145,7 +144,7 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 	}
 
 	// create entry in smithy cluster bucket
-	if _, err = smithyClustersDataBucket.Create(deployCtx, smithyId, agentCluster.Bytes()); err != nil {
+	if _, err = smithyClustersDataBucket.Create(deployCtx, dac.smithyId, agentCluster.Bytes()); err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}

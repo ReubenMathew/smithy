@@ -20,6 +20,7 @@ type Terminator interface {
 
 type teardownAgentsCmd struct {
 	metaCommand
+	smithyId       string
 	serverUrl      string
 	credsPath      string
 	timeout time.Duration
@@ -30,12 +31,13 @@ func teardownAgentsCommand() subcommands.Command {
 		metaCommand: metaCommand{
 			name:     "teardown-agents",
 			synopsis: "terminate all agents for a given id",
-			usage:    "teardown-agents -t <duration> -server <url> -creds </path/to/file>",
+			usage:    "teardown-agents -id <string> -t <duration> -server <url> -creds </path/to/file>",
 		},
 	}
 }
 
 func (tac *teardownAgentsCmd) SetFlags(f *flag.FlagSet) {
+	f.StringVar(&tac.smithyId, "id", "default", "smithy cluster id")
 	f.StringVar(&tac.serverUrl, "server", nats.DefaultURL, "url to command server")
 	f.StringVar(&tac.credsPath, "creds", "", "path to creds file")
 	f.DurationVar(&tac.timeout, "t", 10*time.Minute, "timeout duration")
@@ -78,12 +80,12 @@ func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args 
 		return subcommands.ExitFailure
 	}
 	// check if smithyId already exists
-	agentClusterEntry, err := smithyClustersDataBucket.Get(teardownCtx, smithyId)
+	agentClusterEntry, err := smithyClustersDataBucket.Get(teardownCtx, ec.smithyId)
 	switch err {
 	case nil:
 		// continue
 	case jetstream.ErrKeyNotFound:
-		log.Printf("smithy cluster id: %s does not exist", smithyId)
+		log.Printf("smithy cluster id: %s does not exist", ec.smithyId)
 		return subcommands.ExitFailure
 	default:
 		log.Println(err.Error())
@@ -127,7 +129,7 @@ func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args 
 	log.Println("deleted security group")
 
 	// remove entry from bucket
-	if err = smithyClustersDataBucket.Delete(ctx, smithyId); err != nil {
+	if err = smithyClustersDataBucket.Delete(ctx, ec.smithyId); err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}

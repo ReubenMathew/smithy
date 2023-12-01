@@ -11,28 +11,28 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-type listAgentClustersCmd struct {
+type listCmd struct {
 	metaCommand
 	serverUrl      string
 	credsPath      string
 }
 
-func listAgentClustersCommand() subcommands.Command {
-	return &listAgentClustersCmd{
+func listCommand() subcommands.Command {
+	return &listCmd{
 		metaCommand: metaCommand{
-			name:     "list-agent-clusters",
+			name:     "list",
 			synopsis: "list all smithy agent clusters",
-			usage:    "list-agent-clusters -server <url> -creds </path/to/file>",
+			usage:    "list -server <url> -creds </path/to/file>",
 		},
 	}
 }
 
-func (ec *listAgentClustersCmd) SetFlags(f *flag.FlagSet) {
+func (ec *listCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&ec.serverUrl, "server", nats.DefaultURL, "url of the command server")
 	f.StringVar(&ec.credsPath, "creds", "", "path to creds file")
 }
 
-func (ec *listAgentClustersCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
+func (ec *listCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interface{}) subcommands.ExitStatus {
 
 	// --------------------
 	// HACK: pull out later
