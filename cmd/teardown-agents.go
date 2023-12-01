@@ -5,13 +5,16 @@ import (
 	"flag"
 	"log"
 	"smithy/pkg/aws"
+	"smithy/pkg/cloud"
 	"time"
 
 	"github.com/google/subcommands"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
-type Teardowner interface {
-	DeleteSecurityGroup(ctx context.Context, securityGroupName string) error
+type Terminator interface {
+	DeleteSecurityGroup(ctx context.Context, securityGroupId string) error
 	TerminateComputeInstances(ctx context.Context, instanceIds []string) error
 }
 
@@ -40,30 +43,64 @@ func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args 
 	teardownCtx, cancel := context.WithTimeout(ctx, ec.timeout)
 	defer cancel()
 
-	var (
-		teardowner Teardowner
-		err        error
-	)
+	// --------------------
+	// HACK: pull out later
+
+	// create NATS connection
+	// TODO: pass url and creds as parameters
+	nc, err := nats.Connect(nats.DefaultURL)
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+	defer nc.Close()
+	// create jetstream context
+	js, err := jetstream.New(nc)
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+	// bind to smithy cluster bucket
+	smithyClustersDataBucket, err := js.KeyValue(teardownCtx, smithyClustersDataBucketName)
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+	// check if smithyId already exists
+	agentClusterEntry, err := smithyClustersDataBucket.Get(teardownCtx, smithyId)
+	switch err {
+	case nil:
+		// continue
+	case jetstream.ErrKeyNotFound:
+		log.Printf("smithy cluster id: %s does not exist", smithyId)
+		return subcommands.ExitFailure
+	default:
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+
+	agentCluster, err := cloud.LoadAgentCluster(agentClusterEntry.Value())
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+	// --------------------
+
+	var teardowner Terminator
 	teardowner, err = aws.New(teardownCtx)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
 
-	// HACK: remove later
-	// ------------------
-	awsSvc, err := aws.New(teardownCtx)
-	if err != nil {
-		panic(err)
+	// get instance ids
+	instanceIds := []string{}
+	for _, instance := range agentCluster.ComputeInstances {
+		instanceIds = append(instanceIds, instance.InstanceId)
 	}
-	instanceIds, err := awsSvc.GetEc2InstanceIdsFromSecurityGroupName(ctx, SecurityGroupName)
-	if err != nil {
-		panic(err)
-	}
-	// ------------------
 
 	// terminate compute instances
-	log.Println("terminating down compute instances")
+	log.Printf("terminating compute instances: %v", instanceIds)
 	if err = teardowner.TerminateComputeInstances(teardownCtx, instanceIds); err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
@@ -71,12 +108,18 @@ func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args 
 	log.Println("terminated compute instances")
 
 	// delete security group
-	log.Println("deleting security group")
-	if err = teardowner.DeleteSecurityGroup(teardownCtx, SecurityGroupName); err != nil {
+	log.Printf("deleting security group %s: %s", agentCluster.SecurityGroupName, agentCluster.SecurityGroupId)
+	if err = teardowner.DeleteSecurityGroup(teardownCtx, agentCluster.SecurityGroupId); err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
 	log.Println("deleted security group")
+
+	// remove entry from bucket
+	if err = smithyClustersDataBucket.Delete(ctx, smithyId); err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
 
 	return subcommands.ExitSuccess
 }

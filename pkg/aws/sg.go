@@ -10,9 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
-func (awsClient *AwsService) DeleteSecurityGroup(ctx context.Context, securityGroupName string) error {
+func (awsClient *AwsService) DeleteSecurityGroup(ctx context.Context, securityGroupId string) error {
 	_, err := awsClient.svc.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
-		GroupName: aws.String(securityGroupName),
+		GroupId:   aws.String(securityGroupId),
 	})
 	if err != nil {
 		return fmt.Errorf("unable to delete security group, %v", err)

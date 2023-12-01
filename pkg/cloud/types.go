@@ -16,6 +16,14 @@ type AgentCluster struct {
 	ComputeInstances  []ComputeInstance `json:"compute_instances"`
 }
 
+func LoadAgentCluster(bytes []byte) (*AgentCluster, error) {
+	var ac AgentCluster
+	if err := json.Unmarshal(bytes, &ac); err != nil {
+		return nil, err
+	}
+	return &ac, nil
+}
+
 func (ac *AgentCluster) Bytes() []byte {
 	bytes, err := json.Marshal(ac)
 	if err != nil {

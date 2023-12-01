@@ -56,30 +56,14 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 	deployCtx, cancel := context.WithTimeout(ctx, ec.timeout)
 	defer cancel()
 
-	// TODO: make into a factory
-	var (
-		deployer Deployer
-		err      error
-	)
-	deployer, err = aws.New(deployCtx)
-	if err != nil {
-		log.Println(err.Error())
-		return subcommands.ExitFailure
-	}
-
 	// TODO: make fns for each value here
 	var (
 		securityGroupName = fmt.Sprintf("%s-%s", SecurityGroupNamePrefix, smithyId)
 		instanceTagName   = fmt.Sprintf("%s-%s", InstanceTagNamePrefix, smithyId)
 	)
 
-	// STEPS
-	// 1. does smithyId already exist ? exit : continue
-	// 2. create security group and compute instances
-	// 3. create smithyId->cloud.AgentCluster
-
-	// HACK: pull out later
 	// --------------------
+	// HACK: pull out later
 
 	// create NATS connection
 	// TODO: pass url and creds as parameters
@@ -115,13 +99,22 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 	}
 	// --------------------
 
+	// create deployer service
+	// TODO: make into a factory
+	var deployer Deployer
+	deployer, err = aws.New(deployCtx)
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+
 	log.Printf("creating security group: %s", securityGroupName)
 	securityGroupId, err := deployer.CreateSecurityGroup(deployCtx, securityGroupName)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
-	log.Printf("created security group %s", securityGroupId)
+	log.Printf("created security group %s: %s", securityGroupName, securityGroupId)
 
 	log.Printf("creating %d compute instances", ec.numberOfAgents)
 	computeInstances, err := deployer.CreateComputeInstances(deployCtx, securityGroupName, instanceTagName, int32(ec.numberOfAgents))
@@ -129,7 +122,9 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
-	log.Printf("created compute instances: %v", computeInstances)
+	for _, ci := range computeInstances {
+		log.Printf("created compute instance %s: %s", ci.InstanceId, ci.DnsName)
+	}
 
 	agentCluster := &cloud.AgentCluster{
 		SecurityGroupName: securityGroupName,
@@ -137,14 +132,15 @@ func (ec *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args ..
 		ComputeInstances:  computeInstances,
 	}
 
-	// HACK: pull out later
 	// --------------------
+	// HACK: pull out later
 
 	// create entry in smithy cluster bucket
 	if _, err = smithyClustersDataBucket.Create(deployCtx, smithyId, agentCluster.Bytes()); err != nil {
 		log.Println(err.Error())	
 		return subcommands.ExitFailure
 	}
+	// --------------------
 
 	return subcommands.ExitSuccess
 }
