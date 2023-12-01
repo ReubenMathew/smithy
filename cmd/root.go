@@ -66,6 +66,8 @@ func Run(args []string) int {
 		"managing agents": {
 			deployAgentsCommand(),
 			teardownAgentsCommand(),
+			listAgentClustersCommand(),
+			getAgentClusterInfoCommand(),
 		},
 		"help": {
 			//versionCommand(),
