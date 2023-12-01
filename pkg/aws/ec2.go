@@ -16,7 +16,7 @@ const (
 	InstanceTagName = "temp-nats-compute-instance"
 )
 
-func (awsClient *Aws) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceCount int32) ([]cloud.ComputeInstance, error) {
+func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceCount int32) ([]cloud.ComputeInstance, error) {
 	// create instances
 	res, err := awsClient.svc.RunInstances(ctx, &ec2.RunInstancesInput{
 		SecurityGroups: []string{securityGroupName},
@@ -81,7 +81,7 @@ func (awsClient *Aws) CreateComputeInstances(ctx context.Context, securityGroupN
 	return ec2Instances, nil
 }
 
-func (awsClient *Aws) GetEc2InstanceIdsFromSecurityGroupName(ctx context.Context, securityGroupName string) ([]string, error) {
+func (awsClient *AwsService) GetEc2InstanceIdsFromSecurityGroupName(ctx context.Context, securityGroupName string) ([]string, error) {
 	describeInstancesResp, err := awsClient.svc.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		Filters: []types.Filter{
 			{
@@ -103,7 +103,7 @@ func (awsClient *Aws) GetEc2InstanceIdsFromSecurityGroupName(ctx context.Context
 	return instanceIds, nil
 }
 
-func (awsClient *Aws) TerminateComputeInstances(ctx context.Context, instanceIds []string) error {
+func (awsClient *AwsService) TerminateComputeInstances(ctx context.Context, instanceIds []string) error {
 	_, err := awsClient.svc.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
 		InstanceIds: instanceIds,
 	})

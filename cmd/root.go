@@ -42,7 +42,7 @@ func (mc *metaCommand) Execute(_ context.Context, f *flag.FlagSet, args ...inter
 		return subcommands.ExitFailure
 	}
 
-	var rootOpts *rootOptions = args[0].(*rootOptions)
+	var rootOpts = args[0].(*rootOptions)
 
 	err := mc.execute(rootOpts, f)
 	if err != nil {
@@ -65,6 +65,7 @@ func Run(args []string) int {
 	commandsMap := map[string][]subcommands.Command{
 		"managing agents": {
 			deployAgentsCommand(),
+			teardownAgentsCommand(),
 		},
 		"help": {
 			//versionCommand(),
@@ -85,5 +86,4 @@ func Run(args []string) int {
 		fmt.Fprintf(os.Stderr, "Failed to parse arguments: %v\n", err)
 		return 1
 	}
-	return int(cmdr.Execute(context.Background(), &rootOps))
-}
+	return int(cmdr.Execute(context.Background(), &rootOps)) }

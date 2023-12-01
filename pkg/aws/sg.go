@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
-func (awsClient *Aws) DeleteSecurityGroup(ctx context.Context, securityGroupName string) error {
+func (awsClient *AwsService) DeleteSecurityGroup(ctx context.Context, securityGroupName string) error {
 	_, err := awsClient.svc.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
 		GroupName: aws.String(securityGroupName),
 	})
@@ -20,7 +20,7 @@ func (awsClient *Aws) DeleteSecurityGroup(ctx context.Context, securityGroupName
 	return nil
 }
 
-func (awsClient *Aws) CreateSecurityGroup(ctx context.Context, securityGroupName string) (securityGroupId string, err error) {
+func (awsClient *AwsService) CreateSecurityGroup(ctx context.Context, securityGroupName string) (securityGroupId string, err error) {
 
 	// create security group
 	securityGroup, err := awsClient.svc.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
