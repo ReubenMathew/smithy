@@ -68,6 +68,7 @@ func Run(args []string) int {
 			teardownAgentsCommand(),
 			listCommand(),
 			getInfoCommand(),
+			startAgentCommand(),
 		},
 		"help": {
 			//versionCommand(),

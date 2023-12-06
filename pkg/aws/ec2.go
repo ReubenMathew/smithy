@@ -2,6 +2,8 @@ package aws
 
 import (
 	"context"
+	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"smithy/pkg/cloud"
 	"time"
@@ -13,10 +15,18 @@ import (
 
 const (
 	// TODO: make parameter
-	imageAmiId      = "ami-0e83be366243f524a"
+	imageAmiId = "ami-0e83be366243f524a"
 )
 
-func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceTagName string, instanceCount int32) ([]cloud.ComputeInstance, error) {
+var (
+	//go:embed userData.sh
+	UserData []byte
+)
+
+func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceTagName string, instanceCount int32, userData string) ([]cloud.ComputeInstance, error) {
+
+	b64UserData := base64.StdEncoding.EncodeToString(UserData)
+
 	// create instances
 	res, err := awsClient.svc.RunInstances(ctx, &ec2.RunInstancesInput{
 		SecurityGroups: []string{securityGroupName},
@@ -35,9 +45,11 @@ func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securit
 		InstanceType: types.InstanceTypeT2Micro,
 		MinCount:     aws.Int32(instanceCount),
 		MaxCount:     aws.Int32(instanceCount),
-		KeyName:      aws.String("reuben-dev"),
-		// TODO: put in cloud-init script
-		UserData: aws.String(""),
+		// TODO: put in a better key or use ec2instanceconnect
+		KeyName: aws.String("reuben-dev"),
+		// TODO: change to cloud-init script
+		// TODO: change to use parameter
+		UserData: aws.String(b64UserData),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("unable to run instance(s), %v", err)
