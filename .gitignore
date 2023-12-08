@@ -22,3 +22,6 @@ go.work
 
 # NATS creds
 *.creds
+
+# Smithy
+smithy
