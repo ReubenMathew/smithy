@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"smithy/internal/meta"
 
 	"github.com/google/subcommands"
 	"github.com/nats-io/nats.go"
@@ -59,7 +60,7 @@ func (ec *listCmd) Execute(ctx context.Context, f *flag.FlagSet, args ...interfa
 		return subcommands.ExitFailure
 	}
 	// bind to smithy cluster bucket
-	smithyClustersDataBucket, err := js.KeyValue(ctx, smithyClustersDataBucketName)
+	smithyClustersDataBucket, err := js.KeyValue(ctx, meta.SmithyClustersDataBucketName)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure

@@ -1,0 +1,19 @@
+listen: 127.0.0.1:4222
+
+accounts {
+  $SYS: {
+    users: [
+      { user: sys, password: sys }
+    ]
+  }
+}
+
+jetstream {}
+
+cluster: {
+  name: {{ .ClusterName }}
+  port: 6222
+  routes: [
+  	{{ .ClusterRoutesString }}
+  ]
+}

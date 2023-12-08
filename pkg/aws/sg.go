@@ -63,12 +63,23 @@ func (awsClient *AwsService) CreateSecurityGroup(ctx context.Context, securityGr
 				IpRanges: []types.IpRange{
 					{
 						CidrIp:      aws.String("0.0.0.0/0"),
+						Description: aws.String("NATS port for clustering"),
+					},
+				},
+				FromPort:   aws.Int32(6222),
+				ToPort:     aws.Int32(6222),
+				IpProtocol: aws.String("tcp"),
+			},
+			{
+				IpRanges: []types.IpRange{
+					{
+						CidrIp:      aws.String("0.0.0.0/0"),
 						Description: aws.String("Inbound SSH port from any machine"),
 					},
 				},
-				IpProtocol: aws.String("tcp"),
 				FromPort:   aws.Int32(22),
 				ToPort:     aws.Int32(22),
+				IpProtocol: aws.String("tcp"),
 			},
 		},
 	})

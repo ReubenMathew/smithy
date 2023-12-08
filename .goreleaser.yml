@@ -1,0 +1,34 @@
+env:
+  - GO111MODULE=on
+  - CGO_ENABLED=0
+
+before:
+  hooks:
+    - echo "🚀"
+
+builds:
+  - binary: golang-cli-template
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - builds:
+      - golang-cli-template
+    replacements:
+      darwin: Darwin
+      linux: Linux
+      amd64: x86_64
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^assets:"
+      - "^scripts:"

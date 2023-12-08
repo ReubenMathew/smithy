@@ -1,11 +1,14 @@
 package aws
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"smithy/pkg/cloud"
+	"text/template"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,13 +22,32 @@ const (
 )
 
 var (
-	//go:embed userData.sh
-	UserData []byte
+	//go:embed cloud-init.yml.tmpl
+	CloudInitTemplate string
 )
 
-func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceTagName string, instanceCount int32, userData string) ([]cloud.ComputeInstance, error) {
+func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceTagName string, instanceCount int32, credsPath string) ([]cloud.ComputeInstance, error) {
 
-	b64UserData := base64.StdEncoding.EncodeToString(UserData)
+	// read creds file
+	creds, err := os.ReadFile(credsPath)
+	if err != nil {
+		return nil, fmt.Errorf("unable to open creds file, %v", err)
+	}
+	credsStr := string(creds)
+
+	cloudInitParams := map[string]string{
+		"Creds": credsStr,
+	}
+
+	// template cloud-init
+	buffer := bytes.NewBuffer([]byte{})
+	cloudInitTemplate := template.Must(template.New("cloud-init").Parse(CloudInitTemplate))
+	if err = cloudInitTemplate.Execute(buffer, cloudInitParams); err != nil {
+		return nil, fmt.Errorf("unable to template cloud-init, %v", err)
+	}
+	cloudInitBytes := buffer.Bytes()
+
+	b64UserData := base64.StdEncoding.EncodeToString(cloudInitBytes)
 
 	// create instances
 	res, err := awsClient.svc.RunInstances(ctx, &ec2.RunInstancesInput{
@@ -87,6 +109,8 @@ func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securit
 			ec2Instances = append(ec2Instances, cloud.ComputeInstance{
 				DnsName:    *instance.PublicDnsName,
 				InstanceId: *instance.InstanceId,
+				PrivateIp:  *instance.PrivateIpAddress,
+				PublicIp:   *instance.PublicIpAddress,
 			})
 		}
 	}

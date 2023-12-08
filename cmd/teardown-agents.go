@@ -3,7 +3,9 @@ package cmd
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"smithy/internal/meta"
 	"smithy/pkg/aws"
 	"smithy/pkg/cloud"
 	"time"
@@ -20,10 +22,10 @@ type Terminator interface {
 
 type teardownAgentsCmd struct {
 	metaCommand
-	smithyId       string
-	serverUrl      string
-	credsPath      string
-	timeout time.Duration
+	clusterId string
+	serverUrl string
+	credsPath string
+	timeout   time.Duration
 }
 
 func teardownAgentsCommand() subcommands.Command {
@@ -37,7 +39,7 @@ func teardownAgentsCommand() subcommands.Command {
 }
 
 func (tac *teardownAgentsCmd) SetFlags(f *flag.FlagSet) {
-	f.StringVar(&tac.smithyId, "id", "default", "smithy cluster id")
+	f.StringVar(&tac.clusterId, "id", "default", "smithy cluster id")
 	f.StringVar(&tac.serverUrl, "server", nats.DefaultURL, "url to command server")
 	f.StringVar(&tac.credsPath, "creds", "", "path to creds file")
 	f.DurationVar(&tac.timeout, "t", 10*time.Minute, "timeout duration")
@@ -74,18 +76,18 @@ func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args 
 		return subcommands.ExitFailure
 	}
 	// bind to smithy cluster bucket
-	smithyClustersDataBucket, err := js.KeyValue(teardownCtx, smithyClustersDataBucketName)
+	smithyClustersDataBucket, err := js.KeyValue(teardownCtx, meta.SmithyClustersDataBucketName)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
-	// check if smithyId already exists
-	agentClusterEntry, err := smithyClustersDataBucket.Get(teardownCtx, ec.smithyId)
+	// check if clusterId already exists
+	agentClusterEntry, err := smithyClustersDataBucket.Get(teardownCtx, ec.clusterId)
 	switch err {
 	case nil:
 		// continue
 	case jetstream.ErrKeyNotFound:
-		log.Printf("smithy cluster id: %s does not exist", ec.smithyId)
+		log.Printf("smithy cluster id: %s does not exist", ec.clusterId)
 		return subcommands.ExitFailure
 	default:
 		log.Println(err.Error())
@@ -129,7 +131,25 @@ func (ec *teardownAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args 
 	log.Println("deleted security group")
 
 	// remove entry from bucket
-	if err = smithyClustersDataBucket.Delete(ctx, ec.smithyId); err != nil {
+	if err = smithyClustersDataBucket.Delete(ctx, ec.clusterId); err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+
+	jsObj, err := nc.JetStream()
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+	// remove entry from smithy clusters object store
+	obj, err := jsObj.ObjectStore(meta.SmithyClustersObjStoreName)
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+
+	configFileName := fmt.Sprintf("%s-server.conf", ec.clusterId)
+	if err = obj.Delete(configFileName); err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}

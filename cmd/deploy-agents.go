@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
+	"smithy/internal/meta"
 	"smithy/pkg/aws"
 	"smithy/pkg/cloud"
+	"text/template"
 	"time"
 
 	"github.com/google/subcommands"
@@ -14,15 +18,8 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-const (
-	// TODO: put this in a better place
-	InstanceTagNamePrefix        = "smithy-compute-node"
-	SecurityGroupNamePrefix      = "smithy-sg"
-	smithyClustersDataBucketName = "smithy-agent-clusters"
-)
-
 type Deployer interface {
-	CreateComputeInstances(ctx context.Context, securityGroupName string, instanceGroupName string, instanceCount int32, userData string) ([]cloud.ComputeInstance, error)
+	CreateComputeInstances(ctx context.Context, securityGroupName string, instanceGroupName string, instanceCount int32, credsPath string) ([]cloud.ComputeInstance, error)
 	CreateSecurityGroup(ctx context.Context, securityGroupName string) (securityGroupId string, err error)
 }
 
@@ -31,9 +28,14 @@ type deployAgentsCmd struct {
 	numberOfAgents uint
 	serverUrl      string
 	credsPath      string
-	smithyId       string
+	clusterId      string
 	timeout        time.Duration
 }
+
+var (
+	//go:embed server.conf.tmpl
+	serverConfTemplate string
+)
 
 func deployAgentsCommand() subcommands.Command {
 	return &deployAgentsCmd{
@@ -46,7 +48,7 @@ func deployAgentsCommand() subcommands.Command {
 }
 
 func (dac *deployAgentsCmd) SetFlags(f *flag.FlagSet) {
-	f.StringVar(&dac.smithyId, "id", "default", "smithy cluster id")
+	f.StringVar(&dac.clusterId, "id", "default", "smithy cluster id")
 	f.UintVar(&dac.numberOfAgents, "n", 3, "number of agents")
 	f.StringVar(&dac.serverUrl, "server", nats.DefaultURL, "url to command server")
 	f.StringVar(&dac.credsPath, "creds", "", "path to creds file")
@@ -61,12 +63,9 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 
 	// TODO: make fns for each value here
 	var (
-		securityGroupName = fmt.Sprintf("%s-%s", SecurityGroupNamePrefix, dac.smithyId)
-		instanceTagName   = fmt.Sprintf("%s-%s", InstanceTagNamePrefix, dac.smithyId)
+		securityGroupName = fmt.Sprintf("%s-%s", meta.SecurityGroupNamePrefix, dac.clusterId)
+		instanceTagName   = fmt.Sprintf("%s-%s", meta.InstanceTagNamePrefix, dac.clusterId)
 	)
-
-	// --------------------
-	// HACK: pull out later
 
 	// default options
 	opts := []nats.Option{}
@@ -90,18 +89,17 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 		return subcommands.ExitFailure
 	}
 	// bind to smithy cluster bucket
-	smithyClustersDataBucket, err := js.KeyValue(deployCtx, smithyClustersDataBucketName)
+	smithyClustersDataBucket, err := js.KeyValue(deployCtx, meta.SmithyClustersDataBucketName)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
-	// --------------------
 
-	// check if smithyId already exists
-	_, err = smithyClustersDataBucket.Get(deployCtx, dac.smithyId)
+	// check if clusterId already exists
+	_, err = smithyClustersDataBucket.Get(deployCtx, dac.clusterId)
 	switch err {
 	case nil:
-		log.Printf("smithy cluster %s already exists, nothing to create", dac.smithyId)
+		log.Printf("smithy cluster %s already exists, nothing to create", dac.clusterId)
 		return subcommands.ExitUsageError
 	case jetstream.ErrKeyNotFound:
 		// continue
@@ -128,14 +126,28 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 	log.Printf("created security group %s: %s", securityGroupName, securityGroupId)
 
 	log.Printf("creating %d compute instances", dac.numberOfAgents)
-	computeInstances, err := deployer.CreateComputeInstances(deployCtx, securityGroupName, instanceTagName, int32(dac.numberOfAgents), "")
+	computeInstances, err := deployer.CreateComputeInstances(deployCtx, securityGroupName, instanceTagName, int32(dac.numberOfAgents), dac.credsPath)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}
 	for _, ci := range computeInstances {
-		log.Printf("created compute instance %s: %s", ci.InstanceId, ci.DnsName)
+		log.Printf("created compute instance %s - DnsName: %s, InstanceId: %s, PrivateIp: %s, PublicIp: %s", instanceTagName, ci.DnsName, ci.InstanceId, ci.PrivateIp, ci.PublicIp)
 	}
+
+	//  print NATS urls
+	fmt.Println("nats urls:")
+	for _, ci := range computeInstances {
+		fmt.Printf("nats://%s:4222\n", ci.DnsName)
+	}
+
+	// get cluster urls
+	clusterUrlsString := ""
+	fmt.Println("cluster urls:")
+	for _, ci := range computeInstances {
+		clusterUrlsString += fmt.Sprintf("nats://%s:6222\n", ci.DnsName)
+	}
+	fmt.Println(clusterUrlsString)
 
 	agentCluster := &cloud.AgentCluster{
 		SecurityGroupName: securityGroupName,
@@ -144,7 +156,41 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 	}
 
 	// create entry in smithy cluster bucket
-	if _, err = smithyClustersDataBucket.Create(deployCtx, dac.smithyId, agentCluster.Bytes()); err != nil {
+	if _, err = smithyClustersDataBucket.Create(deployCtx, dac.clusterId, agentCluster.Bytes()); err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+	fmt.Printf("created smithy cluster entry %s\n", dac.clusterId)
+
+	// fill out server.conf template
+	configData := map[string]string{
+		"ClusterName":         dac.clusterId,
+		"ClusterRoutesString": clusterUrlsString,
+	}
+
+	tmpl := template.Must(template.New("server.conf").Parse(serverConfTemplate))
+
+	buffer := new(bytes.Buffer)
+	err = tmpl.Execute(buffer, configData)
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+
+	jsObj, err := nc.JetStream()
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+	obj, err := jsObj.ObjectStore(meta.SmithyClustersObjStoreName)
+	if err != nil {
+		log.Println(err.Error())
+		return subcommands.ExitFailure
+	}
+
+	configFileName := fmt.Sprintf("%s-server.conf", dac.clusterId)
+	_, err = obj.PutBytes(configFileName, buffer.Bytes())
+	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure
 	}

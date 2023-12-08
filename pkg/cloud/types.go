@@ -8,6 +8,8 @@ import (
 type ComputeInstance struct {
 	DnsName    string `json:"dns_name"`
 	InstanceId string `json:"instance_id"`
+	PrivateIp  string `json:"private_ip"`
+	PublicIp   string `json:"public_ip"`
 }
 
 type AgentCluster struct {
