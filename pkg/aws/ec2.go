@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"smithy/pkg/cloud"
+	"strconv"
 	"text/template"
 	"time"
 
@@ -26,7 +27,7 @@ var (
 	CloudInitTemplate string
 )
 
-func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceTagName string, instanceCount int32, credsPath string) ([]cloud.ComputeInstance, error) {
+func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securityGroupName string, instanceTagName string, instanceCount int32, credsPath string, clusterId string) ([]cloud.ComputeInstance, error) {
 
 	// read creds file
 	creds, err := os.ReadFile(credsPath)
@@ -35,51 +36,55 @@ func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securit
 	}
 	credsStr := string(creds)
 
-	cloudInitParams := map[string]string{
-		"Creds": credsStr,
-	}
+	for instanceId := 0; instanceId < int(instanceCount); instanceId++ {
 
-	// template cloud-init
-	buffer := bytes.NewBuffer([]byte{})
-	cloudInitTemplate := template.Must(template.New("cloud-init").Parse(CloudInitTemplate))
-	if err = cloudInitTemplate.Execute(buffer, cloudInitParams); err != nil {
-		return nil, fmt.Errorf("unable to template cloud-init, %v", err)
-	}
-	cloudInitBytes := buffer.Bytes()
+		cloudInitParams := map[string]string{
+			"Creds":      credsStr,
+			"ClusterId":  clusterId,
+			"InstanceId": strconv.Itoa(instanceId),
+		}
 
-	b64UserData := base64.StdEncoding.EncodeToString(cloudInitBytes)
+		// template cloud-init
+		buffer := bytes.NewBuffer([]byte{})
+		cloudInitTemplate := template.Must(template.New("cloud-init").Parse(CloudInitTemplate))
+		if err = cloudInitTemplate.Execute(buffer, cloudInitParams); err != nil {
+			return nil, fmt.Errorf("unable to template cloud-init, %v", err)
+		}
+		cloudInitBytes := buffer.Bytes()
 
-	// create instances
-	res, err := awsClient.svc.RunInstances(ctx, &ec2.RunInstancesInput{
-		SecurityGroups: []string{securityGroupName},
-		TagSpecifications: []types.TagSpecification{
-			{
-				ResourceType: types.ResourceTypeInstance,
-				Tags: []types.Tag{
-					{
-						Key:   aws.String("Name"),
-						Value: aws.String(instanceTagName),
+		b64UserData := base64.StdEncoding.EncodeToString(cloudInitBytes)
+
+		// create instances
+		_, err = awsClient.svc.RunInstances(ctx, &ec2.RunInstancesInput{
+			SecurityGroups: []string{securityGroupName},
+			TagSpecifications: []types.TagSpecification{
+				{
+					ResourceType: types.ResourceTypeInstance,
+					Tags: []types.Tag{
+						{
+							Key:   aws.String("Name"),
+							Value: aws.String(instanceTagName),
+						},
 					},
 				},
 			},
-		},
-		ImageId:      aws.String(imageAmiId),
-		InstanceType: types.InstanceTypeT2Micro,
-		MinCount:     aws.Int32(instanceCount),
-		MaxCount:     aws.Int32(instanceCount),
-		// TODO: put in a better key or use ec2instanceconnect
-		KeyName: aws.String("reuben-dev"),
-		// TODO: change to cloud-init script
-		// TODO: change to use parameter
-		UserData: aws.String(b64UserData),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("unable to run instance(s), %v", err)
+			ImageId:      aws.String(imageAmiId),
+			InstanceType: types.InstanceTypeT2Micro,
+			MinCount:     aws.Int32(1),
+			MaxCount:     aws.Int32(1),
+			// TODO: put in a better key or use ec2instanceconnect
+			KeyName:  aws.String("reuben-dev"),
+			UserData: aws.String(b64UserData),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("unable to run instance(s), %v", err)
+		}
 	}
-	// get all instance ids
-	instanceIds := []string{}
-	for _, instance := range res.Instances {
-		instanceIds = append(instanceIds, *instance.InstanceId)
+
+	// get all instance ids by filtering by security group name
+	instanceIds, err := awsClient.GetEc2InstanceIdsFromSecurityGroupName(ctx, securityGroupName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get instance ids from security group name, %v", err)
 	}
 
 	// wait for instances to be in status ok

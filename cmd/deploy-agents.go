@@ -19,7 +19,7 @@ import (
 )
 
 type Deployer interface {
-	CreateComputeInstances(ctx context.Context, securityGroupName string, instanceGroupName string, instanceCount int32, credsPath string) ([]cloud.ComputeInstance, error)
+	CreateComputeInstances(ctx context.Context, securityGroupName string, instanceGroupName string, instanceCount int32, credsPath string, clusterId string) ([]cloud.ComputeInstance, error)
 	CreateSecurityGroup(ctx context.Context, securityGroupName string) (securityGroupId string, err error)
 }
 
@@ -126,7 +126,7 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 	log.Printf("created security group %s: %s", securityGroupName, securityGroupId)
 
 	log.Printf("creating %d compute instances", dac.numberOfAgents)
-	computeInstances, err := deployer.CreateComputeInstances(deployCtx, securityGroupName, instanceTagName, int32(dac.numberOfAgents), dac.credsPath)
+	computeInstances, err := deployer.CreateComputeInstances(deployCtx, securityGroupName, instanceTagName, int32(dac.numberOfAgents), dac.credsPath, dac.clusterId)
 	if err != nil {
 		log.Println(err.Error())
 		return subcommands.ExitFailure

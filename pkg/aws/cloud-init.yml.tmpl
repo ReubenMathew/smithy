@@ -12,3 +12,6 @@ runcmd:
   - ln -ns /nats/bin/nats-server /bin/nats-server
   - ln -ns /nats/bin/nats-server /nats-server
   - ln -ns /nats/bin/nats-server /usr/local/bin/nats-server
+  - snap install go --classic
+  - go install github.com/ReubenMathew/smithy@main
+  - smithy start-agent -server=tls://connect.ngs.global -creds=/home/ubuntu/ngs.creds -cluster {{ .ClusterId }} -id {{ .InstanceId }}
