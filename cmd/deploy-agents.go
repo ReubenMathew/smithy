@@ -138,16 +138,16 @@ func (dac *deployAgentsCmd) Execute(ctx context.Context, f *flag.FlagSet, args .
 	//  print NATS urls
 	fmt.Println("nats urls:")
 	for _, ci := range computeInstances {
-		fmt.Printf("nats://%s:4222\n", ci.DnsName)
+		fmt.Printf("nats://%s:4222,", ci.DnsName)
 	}
+	// get rid of trailing comma and add newline
+	fmt.Printf("\b\n")
 
 	// get cluster urls
 	clusterUrlsString := ""
-	fmt.Println("cluster urls:")
 	for _, ci := range computeInstances {
 		clusterUrlsString += fmt.Sprintf("nats://%s:6222\n", ci.DnsName)
 	}
-	fmt.Println(clusterUrlsString)
 
 	agentCluster := &cloud.AgentCluster{
 		SecurityGroupName: securityGroupName,

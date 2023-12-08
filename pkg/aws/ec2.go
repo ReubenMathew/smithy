@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"smithy/pkg/cloud"
-	"strconv"
 	"text/template"
 	"time"
 
@@ -34,14 +33,14 @@ func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securit
 	if err != nil {
 		return nil, fmt.Errorf("unable to open creds file, %v", err)
 	}
-	credsStr := string(creds)
+	credsStr := base64.StdEncoding.EncodeToString(creds)
 
 	for instanceId := 0; instanceId < int(instanceCount); instanceId++ {
 
 		cloudInitParams := map[string]string{
 			"Creds":      credsStr,
 			"ClusterId":  clusterId,
-			"InstanceId": strconv.Itoa(instanceId),
+			"InstanceId": fmt.Sprintf("%s-node-%d", clusterId, instanceId),
 		}
 
 		// template cloud-init
@@ -51,6 +50,7 @@ func (awsClient *AwsService) CreateComputeInstances(ctx context.Context, securit
 			return nil, fmt.Errorf("unable to template cloud-init, %v", err)
 		}
 		cloudInitBytes := buffer.Bytes()
+		//fmt.Println(string(cloudInitBytes))
 
 		b64UserData := base64.StdEncoding.EncodeToString(cloudInitBytes)
 

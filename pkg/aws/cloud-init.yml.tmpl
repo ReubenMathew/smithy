@@ -1,8 +1,8 @@
 #cloud-config
 write_files:
   - path: /home/ubuntu/ngs.creds
-    content: |
-		{{ .Creds }}
+    content: "{{ .Creds }}"
+    encoding: "b64"
 runcmd:
   - apt-get update && apt-get upgrade
   - apt-get install ca-certificates
@@ -12,6 +12,6 @@ runcmd:
   - ln -ns /nats/bin/nats-server /bin/nats-server
   - ln -ns /nats/bin/nats-server /nats-server
   - ln -ns /nats/bin/nats-server /usr/local/bin/nats-server
-  - snap install go --classic
-  - go install github.com/ReubenMathew/smithy@main
-  - smithy start-agent -server=tls://connect.ngs.global -creds=/home/ubuntu/ngs.creds -cluster {{ .ClusterId }} -id {{ .InstanceId }}
+  - curl -sL https://github.com/ReubenMathew/smithy/releases/download/v0.0.7/smithy_0.0.7_linux_amd64.tar.gz -o smithy-temp
+  - tar -xzf smithy-temp
+  - smithy start-agent -server=tls://connect.ngs.global -creds=/home/ubuntu/ngs.creds -cluster {{ .ClusterId }} -id {{ .InstanceId }} > /home/ubuntu/smithy.log
