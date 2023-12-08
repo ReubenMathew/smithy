@@ -1,6 +1,6 @@
 module smithy
 
-go 1.21.3
+go 1.21
 
 require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.16.11 // indirect
