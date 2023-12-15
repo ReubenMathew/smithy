@@ -69,6 +69,7 @@ func Run(args []string) int {
 			listCommand(),
 			getInfoCommand(),
 			startAgentCommand(),
+			startNatsCommand(),
 		},
 		"help": {
 			//versionCommand(),
@@ -89,4 +90,5 @@ func Run(args []string) int {
 		fmt.Fprintf(os.Stderr, "Failed to parse arguments: %v\n", err)
 		return 1
 	}
-	return int(cmdr.Execute(context.Background(), &rootOps)) }
+	return int(cmdr.Execute(context.Background(), &rootOps))
+}

@@ -1,4 +1,6 @@
-listen: 127.0.0.1:4222
+port: 4222
+
+log_file: "/tmp/nats-server.log"
 
 accounts {
   $SYS: {
@@ -8,7 +10,9 @@ accounts {
   }
 }
 
-jetstream {}
+jetstream {
+	store_dir: /data/jetstream
+}
 
 cluster: {
   name: {{ .ClusterName }}
